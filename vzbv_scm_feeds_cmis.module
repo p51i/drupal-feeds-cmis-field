@@ -118,7 +118,7 @@ function vzbv_scm_feeds_cmis_set_target($source, $entity, $target, $values, $con
   catch (CMISException $e) {
     drupal_set_message(
       t('Failed to read from CMIS Repository root folder (Check your Field Settings for %field_name). Here is the raw error message from the CMIS Repository: %value',
-          array('%value' => (string) $e, '%field_name' => $instance['field_name']), 'error'));
+          array('%value' => (string) $e, '%field_name' => $instance['field_name'])), 'error');
     return FALSE;
   }
 }
