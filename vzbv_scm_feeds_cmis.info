@@ -1,5 +1,5 @@
-name = vzbv scm_feeds_cmis
-description = A simple Feature to show the inner workings of Drupal Features
+name = SCM: Feeds - CMIS Feld
+description = Erlaubt das Importieren von lokalen Dateien in eine _Zentrale Medien Bilbiothek_
 core = 7.x
 package = vzbv
 dependencies[] = vzbv_core
