@@ -16,7 +16,35 @@ function vzbv_scm_feeds_cmis_feeds_processor_targets_alter(&$targets, $entity_ty
 			);
 		}
 	}
+}
 
+function vzbv_scm_feeds_cmis_find_or_create_document($repository, $folder, array $file) {
+  try {
+    // Check if Document exists
+    $document = cmisapi_getObjectByPath($repository->repositoryId, $file['path']);
+
+    // It does, so just return it
+    return $document;
+  }
+  catch (CMISException $e) {
+    try {
+      // Otherwise create it
+      $document = cmisapi_createDocument(
+        $repository->repositoryId,
+        $folder->id, $file['name'],
+        array(),
+        $file['content'],
+        $file['mimetype'],
+        array('title' => $file['name'])
+      );
+
+      // and return the created Document
+      return $document;
+    }
+    catch (CMISException $e) {
+      return FALSE;
+    }
+  }
 }
 
 function vzbv_scm_feeds_cmis_set_target($source, $entity, $target, $values, $config = array()) {
@@ -31,73 +59,66 @@ function vzbv_scm_feeds_cmis_set_target($source, $entity, $target, $values, $con
   $field_info = field_info_field($target);
   $field = array(LANGUAGE_NONE => array());
 
-  module_load_include('api.inc', 'cmis');
 
   $instance = field_info_instance($entity->feeds_item->entity_type, $target, $entity->type);
 
-  dpm($instance, 'Field Instance');
   if (isset($instance['settings']['cmis_field_rootFolderPath'])) {
     $folder_path = $instance['settings']['cmis_field_rootFolderPath'];
   }
   else {
-    drupal_set_message('CMIS Field has no configured Root Folder Path, please set one and retry', 'error');
+    drupal_set_message('CMIS Field (%field_name) has no configured Root Folder Path, please set one and retry',
+      array('%field_name' => $instance['field_name']), 'error');
     return FALSE;
   }
 
-  dpm($folder_path, 'Import Root Folder');
+  // Require CMIS API functions
+  module_load_include('api.inc', 'cmis');
+  try {
+    $repository = cmis_get_repository();
+    // Load CMIS root folder object
+    $folder = cmisapi_getObjectByPath($repository->repositoryId, $folder_path);
 
+    foreach ($values as $document_path) {
+      $file = array(
+        'name' => basename($document_path),
+        'content' => file_get_contents($document_path),
+        'mimetype' => file_get_mimetype($document_path),
+      );
 
-  foreach ($values as $value) {
-    $document_name = basename($value);
-    $document_public_url = file_create_url($value);
-    $document_content = file_get_contents($document_public_url);
-    $document_mimetype = file_get_mimetype($value);
+      $file['path'] = implode("/", array($folder_path, $file['name']));
 
+      if ($folder->properties['cmis:baseTypeId'] == 'cmis:folder') {
+        $document = vzbv_scm_feeds_cmis_find_or_create_document($repository, $folder, $file);
 
-    dpm($document_name, "Document File Name");
-
-    try {
-      $repository = cmis_get_repository();
-      $folder = cmisapi_getObjectByPath($repository->repositoryId, $folder_path);
-    }
-    catch (CMISException $e) {
-      drupal_set_message(
-        t('Failed to read from CMIS Repository, check your connection: %value',
-        array('%value' => (string) $e)), 'error');
-      return FALSE;
-    }
-
-    if ($folder->properties['cmis:baseTypeId'] == 'cmis:folder') {
-      try {
-        $document = cmisapi_getObjectByPath($repository->repositoryId, implode("/", array($folder_path, $document_name)));
-      }
-      catch (CMISException $e) {
-        dpm($e, 'Get Document Error');
-
-        try {
-          $document = cmisapi_createDocument($repository->repositoryId, $folder->id, $document_name, array(), $document_content, $document_mimetype, array('title' => $document_name));
-          drupal_set_message(t('CMIS object @object_name has been created.', array('@object_name' => $document_name)));
+        if ($document) {
+          drupal_set_message(t('CMIS object @object_name has been created.',
+            array('@object_name' => $file['name'])));
 
           $result = array(
             'path' => $document->id,
-            'title' => $document_name,
+            'title' => $file['name'],
           );
-
-          dpm($result);
 
           $field[LANGUAGE_NONE][] = $result;
 
           $entity->{$target} = $field;
         }
-        catch (CMISException $e) {
-          drupal_set_message(t('Unable to create @object_name object. @error', array('@object_name' => $document_name, '@error' => $e)), 'error');
-          return '';
+        else {
+          drupal_set_message(t('Unable to create @object_name object. @error',
+            array('@object_name' => $file['name'], '@error' => $e)), 'error');
+          return FALSE;
         }
       }
-    }
-    else {
-      drupal_set_message(t('Error while locating the target space @object_id', array('@object_id' => $folder_path)), 'error');
+      else {
+        drupal_set_message(t('Error while locating the target space @object_id',
+          array('@object_id' => $folder_path)), 'error');
+      }
     }
   }
-
+  catch (CMISException $e) {
+    drupal_set_message(
+      t('Failed to read from CMIS Repository root folder (Check your Field Settings for %field_name). Here is the raw error message from the CMIS Repository: %value',
+          array('%value' => (string) $e, '%field_name' => $instance['field_name']), 'error'));
+    return FALSE;
+  }
 }
